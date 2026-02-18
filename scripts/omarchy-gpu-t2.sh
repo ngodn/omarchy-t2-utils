@@ -34,9 +34,23 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-check_root() {
-    if [[ $EUID -ne 0 ]]; then
-        print_error "This script must be run as root (use sudo)"
+# ─── Privilege Escalation ──────────────────────────────────────────────────────
+
+# Re-launches the script as root automatically.
+# pkexec = graphical polkit prompt (GUI sessions)
+# sudo   = terminal fallback
+# Called once at the top of main() — no need to guard individual functions.
+ensure_root() {
+    [[ $EUID -eq 0 ]] && return 0
+
+    print_status "Root privileges required — requesting elevation..."
+
+    if command -v pkexec >/dev/null 2>&1; then
+        exec pkexec --disable-internal-agent bash "$0" "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        exec sudo bash "$0" "$@"
+    else
+        print_error "Neither pkexec nor sudo found. Please run as root manually."
         exit 1
     fi
 }
@@ -382,7 +396,6 @@ interactive_mode() {
         case "$choice" in
             1)
                 confirm "Switch to Intel GPU only? (requires reboot)" || continue
-                check_root
                 create_backup
                 configure_intel_only
                 update_system
@@ -390,7 +403,6 @@ interactive_mode() {
                 ;;
             2)
                 confirm "Switch to AMD GPU only? (requires reboot)" || continue
-                check_root
                 create_backup
                 configure_amd_only
                 update_system
@@ -398,7 +410,6 @@ interactive_mode() {
                 ;;
             3)
                 confirm "Switch to Hybrid mode? (requires reboot)" || continue
-                check_root
                 create_backup
                 configure_hybrid
                 update_system
@@ -406,17 +417,14 @@ interactive_mode() {
                 ;;
             4)
                 confirm "Set AMD DPM to low power?" || continue
-                check_root
                 set_amd_dpm "low"
                 ;;
             5)
                 confirm "Set AMD DPM to high performance?" || continue
-                check_root
                 set_amd_dpm "high"
                 ;;
             6)
                 confirm "Restore backup configuration? (requires reboot)" || continue
-                check_root
                 restore_backup
                 print_warning "Reboot required for changes to take effect"
                 ;;
@@ -440,6 +448,9 @@ interactive_mode() {
 # ─── Main ──────────────────────────────────────────────────────────────────────
 
 main() {
+    # Elevate once here — all code below runs as root
+    ensure_root "$@"
+
     # If no args given, drop into interactive menu
     if [[ $# -eq 0 ]]; then
         interactive_mode
@@ -449,28 +460,24 @@ main() {
     # Otherwise keep supporting direct command-line usage
     case "${1}" in
         "intel-only")
-            check_root
             create_backup
             configure_intel_only
             update_system
             print_warning "Reboot required for changes to take effect"
             ;;
         "amd-only")
-            check_root
             create_backup
             configure_amd_only
             update_system
             print_warning "Reboot required for changes to take effect"
             ;;
         "hybrid")
-            check_root
             create_backup
             configure_hybrid
             update_system
             print_warning "Reboot required for changes to take effect"
             ;;
         "restore")
-            check_root
             restore_backup
             print_warning "Reboot required for changes to take effect"
             ;;
@@ -478,11 +485,9 @@ main() {
             show_current_status
             ;;
         "amd-dpm-low")
-            check_root
             set_amd_dpm "low"
             ;;
         "amd-dpm-high")
-            check_root
             set_amd_dpm "high"
             ;;
         "help"|"--help"|"-h")
